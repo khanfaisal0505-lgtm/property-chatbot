@@ -10,4 +10,4 @@ RUN if [ "$SCRAPE" = "1" ]; then timeout 600 python scrape.py --max-wasalt 40 --
 RUN useradd -m bot && chown -R bot /srv
 USER bot
 EXPOSE 8000
-CMD gunicorn -w 1 --threads 4 -b 0.0.0.0:${PORT} --timeout 90 main:app
+CMD gunicorn -w 1 --threads 4 -b 0.0.0.0:${PORT} --timeout 200 main:app

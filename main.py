@@ -16,11 +16,9 @@ ROOT = Path(__file__).resolve().parent
 DATA = Path(os.getenv("KNOWLEDGE_FILE", ROOT / "knowledge.json"))
 OPENROUTER_URL = os.getenv("OPENROUTER_URL", "https://openrouter.ai/api/v1/chat/completions")
 API_KEY = os.getenv("OPENROUTER_API_KEY", "")
-# openrouter/free routes to an available free model; the extra ones are tried if it fails.
-MODELS = [m.strip() for m in os.getenv(
-    "OPENROUTER_MODELS",
-    "openrouter/free,meta-llama/llama-3.3-70b-instruct:free,qwen/qwen3-next-80b-a3b-instruct:free,z-ai/glm-4.5-air:free",
-).split(",") if m.strip()]
+# openrouter/free picks an available free model at random, so retrying it gives a different model each time.
+MODELS = [m.strip() for m in os.getenv("OPENROUTER_MODELS", "openrouter/free").split(",") if m.strip()]
+ATTEMPTS = int(os.getenv("LLM_ATTEMPTS", "4"))
 TOP_K = int(os.getenv("TOP_K", "8"))
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -88,14 +86,14 @@ def call_openrouter(messages: list[dict]) -> tuple[str, str]:
     if not API_KEY:
         raise RuntimeError("OPENROUTER_API_KEY not set")
     last = None
-    for model in MODELS:
+    for model in [m for m in MODELS for _ in range(ATTEMPTS)]:
         try:
-            r = requests.post(OPENROUTER_URL, timeout=60, headers={
+            r = requests.post(OPENROUTER_URL, timeout=45, headers={
                 "Authorization": f"Bearer {API_KEY}",
                 "Content-Type": "application/json",
                 "HTTP-Referer": os.getenv("APP_URL", "http://localhost:8000"),
                 "X-Title": "DarGlobal & Wasalt Property Chatbot",
-            }, json={"model": model, "messages": messages, "temperature": 0.2, "max_tokens": 700})
+            }, json={"model": model, "messages": messages, "temperature": 0.2, "max_tokens": 2000})
             if r.status_code != 200:
                 last = f"{model}: HTTP {r.status_code} {r.text[:200]}"
                 log.warning(last)
@@ -104,6 +102,8 @@ def call_openrouter(messages: list[dict]) -> tuple[str, str]:
             text = body["choices"][0]["message"]["content"]
             if text and text.strip():
                 return text.strip(), body.get("model", model)
+            last = f"{body.get('model', model)}: empty answer"
+            log.warning(last)
         except (requests.RequestException, KeyError, ValueError) as e:
             last = f"{model}: {e}"
             log.warning(last)
