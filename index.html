@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Property Assistant – DarGlobal &amp; Wasalt</title>
+<style>
+  :root{--bg:#f6f4ef;--ink:#1d1b18;--muted:#6f6a61;--line:#e3ded4;--card:#fff;--accent:#0f5c4d;--accent2:#b08d57}
+  @media (prefers-color-scheme:dark){:root{--bg:#141412;--ink:#ecebe7;--muted:#a19c92;--line:#2c2a26;--card:#1d1c19;--accent:#5fb7a2;--accent2:#d2b07a}}
+  *{box-sizing:border-box}
+  body{margin:0;font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--ink);height:100dvh;display:flex;flex-direction:column}
+  header{padding:18px 22px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+  header h1{margin:0;font:600 19px/1.2 Georgia,"Times New Roman",serif;letter-spacing:.2px}
+  header span{color:var(--muted);font-size:13px}
+  #status{margin-left:auto;font-size:12px;color:var(--muted)}
+  main{flex:1;overflow-y:auto;padding:22px;display:flex;flex-direction:column;gap:14px;max-width:860px;width:100%;margin:0 auto}
+  .msg{max-width:88%;padding:11px 15px;border-radius:14px;white-space:normal;word-wrap:break-word}
+  .user{align-self:flex-end;background:var(--accent);color:#fff;border-bottom-right-radius:4px}
+  .bot{align-self:flex-start;background:var(--card);border:1px solid var(--line);border-bottom-left-radius:4px}
+  .bot a{color:var(--accent)} .bot ul{margin:6px 0;padding-left:20px}
+  .meta{font-size:11.5px;color:var(--muted);margin-top:6px}
+  .chips{display:flex;flex-wrap:wrap;gap:8px}
+  .chip{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:999px;padding:7px 13px;font-size:13px;cursor:pointer}
+  .chip:hover{border-color:var(--accent2)}
+  form{display:flex;gap:10px;padding:14px 22px 20px;max-width:860px;width:100%;margin:0 auto}
+  textarea{flex:1;resize:none;border:1px solid var(--line);border-radius:12px;padding:12px 14px;font:inherit;background:var(--card);color:var(--ink);min-height:48px;max-height:140px}
+  textarea:focus{outline:2px solid var(--accent);outline-offset:1px}
+  button.send{border:0;border-radius:12px;padding:0 20px;background:var(--accent);color:#fff;font-weight:600;cursor:pointer}
+  button.send:disabled{opacity:.5;cursor:default}
+  .typing{color:var(--muted);font-style:italic}
+</style>
+</head>
+<body>
+<header>
+  <h1>Property Assistant</h1>
+  <span>Answers from public DarGlobal projects &amp; Wasalt listings</span>
+  <div id="status"></div>
+</header>
+<main id="log">
+  <div class="msg bot">Hi! Ask me about DarGlobal's branded developments (Dubai, Jeddah, Riyadh, Muscat, Doha, Spain, London) or Wasalt listings for sale and rent in Saudi Arabia.</div>
+  <div class="chips" id="chips"></div>
+</main>
+<form id="f">
+  <textarea id="q" placeholder="e.g. 3-bedroom apartments for rent in Riyadh under 100k" rows="1"></textarea>
+  <button class="send" id="send">Send</button>
+</form>
+<script>
+const SUGGESTIONS = [
+  "What DarGlobal projects are in Saudi Arabia?",
+  "Tell me about Trump Tower Jeddah",
+  "3-bedroom apartments for rent in Riyadh",
+  "Cheapest apartments for sale in Jeddah on Wasalt",
+  "Which DarGlobal projects have Aston Martin or Pagani interiors?",
+  "What is Wasalt?"
+];
+const log = document.getElementById('log'), q = document.getElementById('q'), sendBtn = document.getElementById('send');
+const history = [];
+
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function md(t){
+  let h = esc(t);
+  h = h.replace(/\[([^\]]+)\]\((https:\/\/[^)\s]+)\)/g,(m,a,u)=>`<a href="${u}" target="_blank" rel="noopener">${a}</a>`);
+  h = h.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
+  const lines = h.split('\n'); let out='', inList=false;
+  for (const l of lines){
+    const m = l.match(/^\s*[-*•]\s+(.*)/);
+    if (m){ if(!inList){out+='<ul>';inList=true} out+=`<li>${m[1]}</li>`; }
+    else { if(inList){out+='</ul>';inList=false} if(l.trim()) out+=`<div>${l}</div>`; }
+  }
+  return out + (inList?'</ul>':'');
+}
+function add(role, html){
+  const d=document.createElement('div'); d.className='msg '+role; d.innerHTML=html; log.appendChild(d); log.scrollTop=log.scrollHeight; return d;
+}
+
+// Backend: the Docker app calls /api/chat. A host page can override window.askBot(history) -> {answer, model, sources}.
+async function defaultAsk(h){
+  const r = await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:h})});
+  if(!r.ok) throw new Error('Server error '+r.status);
+  return r.json();
+}
+
+async function ask(text){
+  text = text.trim(); if(!text) return;
+  document.getElementById('chips').remove?.();
+  add('user', esc(text)); history.push({role:'user',content:text});
+  q.value=''; sendBtn.disabled=true;
+  const pending = add('bot','<span class="typing">Searching listings…</span>');
+  try{
+    const res = await (window.askBot || defaultAsk)(history);
+    history.push({role:'assistant',content:res.answer});
+    let meta = res.model ? `Model: ${esc(res.model)}` : '';
+    pending.innerHTML = md(res.answer) + (meta?`<div class="meta">${meta}</div>`:'');
+  }catch(e){ pending.innerHTML = 'Sorry, something went wrong: '+esc(e.message||e); history.pop(); }
+  sendBtn.disabled=false; q.focus(); log.scrollTop=log.scrollHeight;
+}
+
+const chips=document.getElementById('chips');
+SUGGESTIONS.forEach(s=>{const b=document.createElement('button');b.type='button';b.className='chip';b.textContent=s;b.onclick=()=>ask(s);chips.appendChild(b)});
+document.getElementById('f').onsubmit=e=>{e.preventDefault();ask(q.value)};
+q.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();ask(q.value)}});
+if(!window.askBot){fetch('/api/health').then(r=>r.json()).then(h=>{document.getElementById('status').textContent=`${h.records} records · ${h.llm_configured?'LLM: OpenRouter':'LLM key missing – retrieval only'}`}).catch(()=>{})}
+</script>
+</body>
+</html>
